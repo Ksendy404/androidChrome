@@ -1,9 +1,7 @@
 FROM ubuntu:20.04
 
 # Author
-# ---------------------------------------------------------------------- #
-LABEL maintainer "thyrlian@gmail.com"
-
+# ---------------------------------------------------------------------- 
 # support multiarch: i386 architecture
 # install Java
 # install essential tools
