@@ -1,40 +1,37 @@
-FROM golang:1.14 as go
+FROM ubuntu:20.04
 
-RUN \
+# Author
+# ---------------------------------------------------------------------- #
+LABEL maintainer "thyrlian@gmail.com"
+
+# support multiarch: i386 architecture
+# install Java
+# install essential tools
+# install Qt
+RUN dpkg --add-architecture i386 && \
     apt-get update && \
-    apt-get install -y upx-ucl libx11-dev && \
-    cd /devtools && \
-    GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" && \
-    upx /devtools/devtools
+    apt-get install -y --no-install-recommends libncurses5:i386 libc6:i386 libstdc++6:i386 lib32gcc1 lib32ncurses6 lib32z1 zlib1g:i386 && \
+    apt-get install -y --no-install-recommends openjdk-8-jdk && \
+    apt-get install -y --no-install-recommends git wget unzip && \
+    apt-get install -y --no-install-recommends qt5-default
 
-FROM ubuntu:18.04
+# download and install Gradle
+# https://services.gradle.org/distributions/
+ARG GRADLE_VERSION=6.4.1
+ARG GRADLE_DIST=bin
+RUN cd /opt && \
+    wget -q https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-${GRADLE_DIST}.zip && \
+    unzip gradle*.zip && \
+    ls -d */ | sed 's/\/*$//g' | xargs -I{} mv {} gradle && \
+    rm gradle*.zip
 
-ARG APPIUM_VERSION="1.8.1"
-
-RUN \
-    apt update && \
-    apt remove -y libcurl4 && \
-    apt install -y apt-transport-https ca-certificates tzdata locales libcurl4 curl gnupg && \
-	curl --silent --location https://deb.nodesource.com/setup_10.x | bash - && \
-	apt install -y --no-install-recommends \
-	    curl \
-	    iproute2 \
-	    nodejs \
-	    openjdk-8-jre-headless \
-	    unzip \
-	    xvfb \
-	    libpulse0 \
-		libxcomposite1 \
-		libxcursor1 \
-		libxi6 \
-		libasound2 \
-        fluxbox \
-        x11vnc \
-        feh \
-        wmctrl \
-	    libglib2.0-0 && \
-    apt-get clean && \
-    rm -Rf /tmp/* && rm -Rf /var/lib/apt/lists/*
+# download and install Kotlin compiler
+# https://github.com/JetBrains/kotlin/releases/latest
+ARG KOTLIN_VERSION=1.3.72
+RUN cd /opt && \
+    wget -q https://github.com/JetBrains/kotlin/releases/download/v${KOTLIN_VERSION}/kotlin-compiler-${KOTLIN_VERSION}.zip && \
+    unzip *kotlin*.zip && \
+    rm *kotlin*.zip
     
 # Install Chrome WebDriver
 RUN CHROMEDRIVER_VERSION=`curl -sS chromedriver.storage.googleapis.com/LATEST_RELEASE` && \
@@ -45,54 +42,57 @@ RUN CHROMEDRIVER_VERSION=`curl -sS chromedriver.storage.googleapis.com/LATEST_RE
     chmod +x /opt/chromedriver-$CHROMEDRIVER_VERSION/chromedriver && \
     ln -fs /opt/chromedriver-$CHROMEDRIVER_VERSION/chromedriver /usr/local/bin/chromedriver
 
-RUN cd / && npm install --prefix ./opt/ appium@$APPIUM_VERSION
+# download and install Android SDK
+# https://developer.android.com/studio#command-tools
+ARG ANDROID_SDK_VERSION=6514223
+ENV ANDROID_SDK_ROOT /opt/android-sdk
+RUN mkdir -p ${ANDROID_SDK_ROOT}/cmdline-tools && \
+    wget -q https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_SDK_VERSION}_latest.zip && \
+    unzip *tools*linux*.zip -d ${ANDROID_SDK_ROOT}/cmdline-tools && \
+    rm *tools*linux*.zip
 
-COPY android.conf /etc/ld.so.conf.d/
-COPY fluxbox/aerokube /usr/share/fluxbox/styles/
-COPY fluxbox/init /root/.fluxbox/
-COPY fluxbox/aerokube.png /usr/share/images/fluxbox/
-COPY --from=go /devtools/devtools /usr/bin/
-
-# Android SDK
-ENV ANDROID_HOME /opt/android-sdk-linux
-ENV PATH /opt/android-sdk-linux/platform-tools:/opt/android-sdk-linux/tools:/opt/android-sdk-linux/tools/bin:/opt/android-sdk-linux/emulator:$PATH
-ENV LD_LIBRARY_PATH ${ANDROID_HOME}/emulator/lib64:${ANDROID_HOME}/emulator/lib64/gles_swiftshader:${ANDROID_HOME}/emulator/lib64/qt/lib:${ANDROID_HOME}/emulator/lib64/vulkan:${LD_LIBRARY_PATH}
+# set the environment variables
 ENV JAVA_HOME /usr/lib/jvm/java-8-openjdk-amd64
+ENV GRADLE_HOME /opt/gradle
+ENV KOTLIN_HOME /opt/kotlinc
+ENV PATH ${PATH}:${GRADLE_HOME}/bin:${KOTLIN_HOME}/bin:${ANDROID_SDK_ROOT}/cmdline-tools/tools/bin:${ANDROID_SDK_ROOT}/platform-tools:${ANDROID_SDK_ROOT}/emulator
+ENV _JAVA_OPTIONS -XX:+UnlockExperimentalVMOptions -XX:+UseCGroupMemoryLimitForHeap
+# WORKAROUND: for issue https://issuetracker.google.com/issues/37137213
+ENV LD_LIBRARY_PATH ${ANDROID_SDK_ROOT}/emulator/lib64:${ANDROID_SDK_ROOT}/emulator/lib64/qt/lib
+# patch emulator issue: Running as root without --no-sandbox is not supported. See https://crbug.com/638180.
+# https://doc.qt.io/qt-5/qtwebengine-platform-notes.html#sandboxing-support
+ENV QTWEBENGINE_DISABLE_SANDBOX 1
 
-ARG ANDROID_DEVICE=""
-ARG AVD_NAME="android6.0-1"
-ARG BUILD_TOOLS="build-tools;23.0.1"
-ARG PLATFORM="android-23"
-ARG EMULATOR_IMAGE="system-images;android-23;default;x86"
-ARG EMULATOR_IMAGE_TYPE="default"
-ARG ANDROID_ABI="x86"
-ARG SDCARD_SIZE="500"
-ARG USERDATA_SIZE="500"
+# accept the license agreements of the SDK components
+ADD license_accepter.sh /opt/
+RUN chmod +x /opt/license_accepter.sh && /opt/license_accepter.sh $ANDROID_SDK_ROOT
 
-RUN \
-	curl -o sdk-tools.zip https://dl.google.com/android/repository/sdk-tools-linux-4333796.zip && \
-	mkdir -p /opt/android-sdk-linux && \
-	unzip -q sdk-tools.zip -d /opt/android-sdk-linux && \
-	rm sdk-tools.zip && \
-	yes | sdkmanager --licenses
+# setup adb server
+EXPOSE 5037
 
-RUN \
-	sdkmanager "emulator" "tools" "platform-tools" "$BUILD_TOOLS" "platforms;$PLATFORM" "$EMULATOR_IMAGE" && \
-	mksdcard "$SDCARD_SIZE"M sdcard.img && \
-	echo "no" | ( \
-	    ([ -n "$ANDROID_DEVICE" ] && avdmanager create avd -n "$AVD_NAME" -k "$EMULATOR_IMAGE" --abi "$ANDROID_ABI" --device "$ANDROID_DEVICE" --sdcard /sdcard.img ) || \
-	    avdmanager create avd -n "$AVD_NAME" -k "$EMULATOR_IMAGE" --abi "$ANDROID_ABI" --sdcard /sdcard.img \
-    ) && \
-	ldconfig && \
-	( \
-	    resize2fs /root/.android/avd/$AVD_NAME.avd/userdata.img "$USERDATA_SIZE"M || \
-	    /opt/android-sdk-linux/emulator/qemu-img resize -f raw /root/.android/avd/$AVD_NAME.avd/userdata.img "$USERDATA_SIZE"M \
-    ) && \
-	mv /root/.android/avd/$AVD_NAME.avd/userdata.img /root/.android/avd/$AVD_NAME.avd/userdata-qemu.img && \
-	rm /opt/android-sdk-linux/system-images/$PLATFORM/$EMULATOR_IMAGE_TYPE/"$ANDROID_ABI"/userdata.img
+# install and configure SSH server
+EXPOSE 22
+ADD sshd-banner /etc/ssh/
+ADD authorized_keys /tmp/
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends openssh-server supervisor locales && \
+    mkdir -p /var/run/sshd /var/log/supervisord && \
+    locale-gen en en_US en_US.UTF-8 && \
+    apt-get remove -y locales && apt-get autoremove -y && \
+    FILE_SSHD_CONFIG="/etc/ssh/sshd_config" && \
+    echo "\nBanner /etc/ssh/sshd-banner" >> $FILE_SSHD_CONFIG && \
+    echo "\nPermitUserEnvironment=yes" >> $FILE_SSHD_CONFIG && \
+    ssh-keygen -q -N "" -f /root/.ssh/id_rsa && \
+    FILE_SSH_ENV="/root/.ssh/environment" && \
+    touch $FILE_SSH_ENV && chmod 600 $FILE_SSH_ENV && \
+    printenv | grep "JAVA_HOME\|GRADLE_HOME\|KOTLIN_HOME\|ANDROID_SDK_ROOT\|LD_LIBRARY_PATH\|PATH" >> $FILE_SSH_ENV && \
+    echo "\nauth required pam_env.so envfile=$FILE_SSH_ENV" >> /etc/pam.d/sshd && \
+    FILE_AUTH_KEYS="/root/.ssh/authorized_keys" && \
+    touch $FILE_AUTH_KEYS && chmod 600 $FILE_AUTH_KEYS && \
+    for file in /tmp/*.pub; \
+    do if [ -f "$file" ]; then echo "\n" >> $FILE_AUTH_KEYS && cat $file >> $FILE_AUTH_KEYS && echo "\n" >> $FILE_AUTH_KEYS; fi; \
+    done && \
+    (rm /tmp/*.pub 2> /dev/null || true)
 
-COPY emulator-snapshot.sh tmp/chromedriver* *.apk /usr/bin/
-
-# Entrypoint
-COPY tmp/entrypoint.sh /
-ENTRYPOINT ["/entrypoint.sh"]
+ADD supervisord.conf /etc/supervisor/conf.d/
+CMD ["/usr/bin/supervisord"]
