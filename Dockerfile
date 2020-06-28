@@ -37,15 +37,7 @@ RUN \
 	    libglib2.0-0 && \
     apt-get clean && \
     rm -Rf /tmp/* && rm -Rf /var/lib/apt/lists/*
-
-RUN cd / && npm install --prefix ./opt/ appium@$APPIUM_VERSION
-
-COPY android.conf /etc/ld.so.conf.d/
-COPY fluxbox/aerokube /usr/share/fluxbox/styles/
-COPY fluxbox/init /root/.fluxbox/
-COPY fluxbox/aerokube.png /usr/share/images/fluxbox/
-COPY --from=go /devtools/devtools /usr/bin/
-
+    
 # Install Chrome WebDriver
 RUN CHROMEDRIVER_VERSION=`curl -sS chromedriver.storage.googleapis.com/LATEST_RELEASE` && \
     mkdir -p /opt/chromedriver-$CHROMEDRIVER_VERSION && \
@@ -54,6 +46,14 @@ RUN CHROMEDRIVER_VERSION=`curl -sS chromedriver.storage.googleapis.com/LATEST_RE
     rm /tmp/chromedriver_linux64.zip && \
     chmod +x /opt/chromedriver-$CHROMEDRIVER_VERSION/chromedriver && \
     ln -fs /opt/chromedriver-$CHROMEDRIVER_VERSION/chromedriver /usr/local/bin/chromedriver
+    
+RUN cd / && npm install --prefix ./opt/ appium@$APPIUM_VERSION
+
+COPY android.conf /etc/ld.so.conf.d/
+COPY fluxbox/aerokube /usr/share/fluxbox/styles/
+COPY fluxbox/init /root/.fluxbox/
+COPY fluxbox/aerokube.png /usr/share/images/fluxbox/
+COPY --from=go /devtools/devtools /usr/bin/
 
 # Android SDK
 ENV ANDROID_HOME /opt/android-sdk-linux
